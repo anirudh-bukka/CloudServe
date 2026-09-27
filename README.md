@@ -12,7 +12,7 @@ cd CloudServe
 python3 -m src.api
 ```
 
-Open [http://localhost:8000](http://localhost:8000). Choose a sample ticket, select **Analyze ticket**, and inspect its route and evidence. The API health endpoint is `/api/health`.
+Open [http://localhost:8000](http://localhost:8000). Choose a sample ticket, select **Analyze ticket**, and inspect its route and evidence. The themed system status page is at `/status`; the machine-readable health endpoint remains at `/api/health`.
 
 To use a different port: `PORT=8080 python3 -m src.api`. The service binds to all interfaces by default. For a network you do not control, use the deployment instructions below rather than exposing your laptop directly.
 
