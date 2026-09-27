@@ -4,15 +4,44 @@ from __future__ import annotations
 import json
 import os
 import uuid
+from collections import Counter
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
-from src.core import DecisionLog, Engine, ROOT, load_json
+from src.core import DecisionLog, Engine, ROOT, failure_decision, load_json
 
 ENGINE = Engine()
 DB = DecisionLog(Path(os.getenv("DATABASE_PATH", str(ROOT / "storage" / "decisions.sqlite3"))))
 SAMPLES = load_json(ROOT / "data" / "validation_tickets.json")
+
+
+def metrics_text() -> bytes:
+    with DB.lock:
+        rows = DB.connection.execute("SELECT payload FROM decisions").fetchall()
+    decisions = [json.loads(row[0]) for row in rows]
+    routes = Counter((d["channel"], d["route"]) for d in decisions)
+    blocks = Counter(key for d in decisions for key, active in d["guardrails"].items()
+                     if active and key != "grounding")
+    latencies = sorted(d["latency_ms"] / 1000 for d in decisions)
+    confidences = Counter(min(4, int(d["classification"]["confidence"] * 5)) for d in decisions)
+    lines = ["# HELP cloudserve_tickets_processed_total Logged tickets by channel and outcome",
+             "# TYPE cloudserve_tickets_processed_total counter"]
+    lines.extend(f'cloudserve_tickets_processed_total{{channel="{channel}",outcome="{outcome}"}} {count}'
+                 for (channel, outcome), count in sorted(routes.items()))
+    lines += ["# HELP cloudserve_guardrail_activations_total Guardrail detections",
+              "# TYPE cloudserve_guardrail_activations_total counter"]
+    lines.extend(f'cloudserve_guardrail_activations_total{{guardrail="{name}"}} {count}'
+                 for name, count in sorted(blocks.items()))
+    lines += ["# HELP cloudserve_processing_latency_seconds Processing latency quantiles",
+              "# TYPE cloudserve_processing_latency_seconds gauge"]
+    for label, index in (("0.5", .5), ("0.95", .95)):
+        value = latencies[round((len(latencies) - 1) * index)] if latencies else 0
+        lines.append(f'cloudserve_processing_latency_seconds{{quantile="{label}"}} {value:.6f}')
+    lines += ["# HELP cloudserve_confidence_band_total Decisions by confidence band",
+              "# TYPE cloudserve_confidence_band_total gauge"]
+    lines.extend(f'cloudserve_confidence_band_total{{band="{band}"}} {confidences[band]}' for band in range(5))
+    return ("\n".join(lines) + "\n").encode()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -29,6 +58,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         path = urlparse(self.path).path
+        if path == "/metrics":
+            try:
+                return self.send(200, metrics_text(), "text/plain; version=0.0.4; charset=utf-8")
+            except Exception:
+                return self.json(503, {"error": "Metrics unavailable"})
         if path == "/api/health":
             try:
                 with DB.lock:
@@ -42,7 +76,8 @@ class Handler(BaseHTTPRequestHandler):
                 "documents": len(ENGINE.documents),
                 "training_examples": len(ENGINE.examples),
                 "database": database,
-                "automation_enabled": os.getenv("AUTO_RESPONSE_ENABLED", "true").lower() == "true",
+                "automation_enabled": os.getenv("AUTO_RESPONSE_ENABLED", "true").lower() == "true"
+                    and not Path(os.getenv("AUTO_RESPONSE_PAUSE_FILE", str(ROOT / "storage" / "pause_auto_responses"))).exists(),
             })
         if path == "/api/samples":
             return self.json(200, [{"ticket_id": t["ticket_id"], "subject": t["subject"] or t["body"][:70], "channel": t["channel"]} for t in SAMPLES])
@@ -66,6 +101,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         if urlparse(self.path).path != "/api/triage":
             return self.json(404, {"error": "Not found"})
+        ticket = {}
         try:
             size = int(self.headers.get("Content-Length", "0"))
             if size > 100000:
@@ -77,7 +113,12 @@ class Handler(BaseHTTPRequestHandler):
         except (ValueError, TypeError, json.JSONDecodeError):
             return self.json(400, {"error": "Invalid JSON ticket"})
         except Exception as exc:
-            return self.json(500, {"error": type(exc).__name__})
+            decision = failure_decision(ticket, exc)
+            try:
+                DB.write(str(uuid.uuid4()), decision)
+            except Exception:
+                return self.json(503, {"error": "Decision log unavailable; ticket requires human review"})
+            return self.json(200, decision)
 
 
 def main() -> None:
