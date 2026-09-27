@@ -1,10 +1,12 @@
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from evaluation.harness import report
-from src.core import DecisionLog, Engine, normalize
+from src.core import DecisionLog, Engine, failure_decision, normalize
 
 
 class PipelineTests(unittest.TestCase):
@@ -62,6 +64,34 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(metrics['volume']['processed'], 8)
             self.assertEqual(metrics['governance']['decisions_logged'], 8)
             self.assertEqual(metrics['volume']['answered_automatically'] + metrics['volume']['escalated'], 8)
+            self.assertIn('audit', decisions[0])
+            self.assertEqual(decisions[0]['audit']['action_taken'], decisions[0]['route'])
+            self.assertIn('threshold_applied', decisions[0]['audit'])
+
+    def test_conservative_route_on_unseen_or_sensitive_ticket(self):
+        for ticket in (
+            {'ticket_id': 'UNSEEN', 'channel': 'chat', 'body': 'Can you advise about API pagination for my unusual configuration?'},
+            {'ticket_id': 'SENSITIVE', 'channel': 'email', 'body': 'Our data residency setting is wrong. Where is our data?'}):
+            with self.subTest(ticket=ticket['ticket_id']):
+                decision = self.engine.process(ticket)
+                self.assertEqual(decision['route'], 'escalate')
+                self.assertIsNone(decision['answer'])
+
+    def test_failure_fallback_redacts_and_escalates(self):
+        decision = failure_decision({'ticket_id': 'FAIL', 'channel': 'chat',
+                                     'body': 'My card is 4111 1111 1111 1111'}, RuntimeError('fault'))
+        self.assertEqual(decision['route'], 'escalate')
+        self.assertTrue(decision['blocked'])
+        self.assertNotIn('4111', decision['summary'])
+
+    def test_pause_file_stops_automatic_route_without_restart(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            pause = Path(tmp) / 'pause'
+            with patch.dict(os.environ, {'AUTO_RESPONSE_PAUSE_FILE': str(pause)}):
+                pause.touch()
+                decision = self.engine.process(self.samples[7])
+                self.assertEqual(decision['route'], 'escalate')
+                self.assertIn('paused', decision['reason'])
 
 
 if __name__ == '__main__':
