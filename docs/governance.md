@@ -6,10 +6,10 @@ This system is a capstone demonstration using synthetic CloudServe data. It shou
 
 ## Decision policy
 
-1. `AUTO_RESPONSE_ENABLED=false` pauses automatic answers.
+1. Creating `storage/pause_auto_responses` pauses automatic drafts on the next ticket without restarting; `AUTO_RESPONSE_ENABLED=false` is a startup control.
 2. Prompt injection patterns and private data trigger human review.
 3. Security incidents, compliance requests, feature requests, and unclear requests require a human.
-4. Ambiguous historical routes, no relevant documentation, and low confidence require a human.
+4. Ambiguous historical routes, no relevant documentation, low confidence, unseen wording, or disagreement on the primary document require a human.
 5. A drafted response is released only if every citation resolves to a retrieved passage and no private data is in the answer.
 
 A support lead should inspect an escalation's `reason`, `summary`, `sources`, and `guardrails` before responding. The decision log records every route. If the system itself fails on a ticket, the batch harness writes an escalation so the ticket remains visible.
@@ -28,7 +28,7 @@ A support lead should inspect an escalation's `reason`, `summary`, `sources`, an
 ## Incident procedure
 
 1. Detect by reviewing logs, reports, and user complaints. Record affected ticket IDs and times.
-2. Contain by setting `AUTO_RESPONSE_ENABLED=false` and restarting the service. Verify a test ticket escalates.
+2. Contain by creating `storage/pause_auto_responses`; the next ticket escalates without restarting. Verify with a test ticket.
 3. Assess the SQLite log and affected responses; identify whether sensitive data was exposed or unsupported guidance was sent.
 4. Notify the support lead and any required privacy or security owner under the organization's policy.
 5. Correct the source article, classifier, or guardrail; test the failure case and a full batch before restoring automation.
