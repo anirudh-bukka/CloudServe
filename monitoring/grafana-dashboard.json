@@ -1,0 +1,15 @@
+{
+  "title": "CloudServe Support Operations",
+  "uid": "cloudserve-support",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": {"from": "now-24h", "to": "now"},
+  "panels": [
+    {"id": 1, "title": "Logged tickets by channel and route", "type": "timeseries", "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0}, "targets": [{"expr": "cloudserve_tickets_processed_total", "legendFormat": "{{channel}} / {{outcome}}"}]},
+    {"id": 2, "title": "Automatic and escalated share", "type": "timeseries", "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0}, "targets": [{"expr": "sum by (outcome) (cloudserve_tickets_processed_total) / clamp_min(sum(cloudserve_tickets_processed_total), 1)", "legendFormat": "{{outcome}}"}]},
+    {"id": 3, "title": "Processing latency", "type": "timeseries", "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8}, "targets": [{"expr": "cloudserve_processing_latency_seconds", "legendFormat": "p{{quantile}}"}]},
+    {"id": 4, "title": "Guardrail detections", "type": "timeseries", "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8}, "targets": [{"expr": "cloudserve_guardrail_activations_total", "legendFormat": "{{guardrail}}"}]},
+    {"id": 5, "title": "Confidence distribution", "type": "barchart", "gridPos": {"h": 8, "w": 24, "x": 0, "y": 16}, "targets": [{"expr": "cloudserve_confidence_band_total", "legendFormat": "band {{band}}"}]}
+  ]
+}
