@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#123d61">
+  <title>CloudServe · System status</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body class="status-page">
+  <header>
+    <div class="brand"><span class="mark">C<span>●</span></span><span>CloudServe <small>Support intelligence</small></span></div>
+    <nav aria-label="Main navigation">
+      <a href="/#workspace">Workspace</a>
+      <a href="/#how-it-works">How it works</a>
+      <a href="/status" aria-current="page">System status ↗</a>
+    </nav>
+  </header>
+  <main>
+    <section class="hero status-hero">
+      <div class="eyebrow"><span class="pulse"></span> CLOUDSERVE SERVICE HEALTH</div>
+      <h1>System status.<br><em>At a glance.</em></h1>
+      <p>Live checks for the support intelligence workspace and the resources it uses to make decisions.</p>
+      <a class="hero-link" href="/">Open workspace <span>↗</span></a>
+      <div class="status-orb" aria-hidden="true"><span>✳</span></div>
+    </section>
+    <section class="status-content" aria-labelledby="status-heading">
+      <div class="section-heading">
+        <div><span class="section-kicker">LIVE SERVICE CHECK</span><h2 id="status-heading">Current health</h2></div>
+        <p id="checked-at">Checking the service…</p>
+      </div>
+      <div class="status-banner" id="status-banner" role="status" aria-live="polite">
+        <span class="status-banner-icon" aria-hidden="true">●</span>
+        <div><strong id="status-title">Checking service</strong><p id="status-description">Connecting to the CloudServe health endpoint.</p></div>
+      </div>
+      <div class="status-grid">
+        <article class="status-card"><span class="status-card-label">SERVICE</span><strong id="service-value">Checking…</strong><p>Support triage API</p></article>
+        <article class="status-card"><span class="status-card-label">KNOWLEDGE BASE</span><strong id="documents-value">—</strong><p>Available documents</p></article>
+        <article class="status-card"><span class="status-card-label">TRAINING DATA</span><strong id="training-value">—</strong><p>Loaded examples</p></article>
+        <article class="status-card"><span class="status-card-label">DECISION LOG</span><strong id="database-value">Checking…</strong><p>Database connection</p></article>
+      </div>
+      <div class="status-bottom"><span id="automation-value">Checking automation setting…</span><a href="/api/health">View raw health data ↗</a></div>
+    </section>
+  </main>
+  <footer><span>CloudServe support triage · Capstone demonstration</span><span>Health checks refresh every 30 seconds.</span></footer>
+  <script src="/status.js" defer></script>
+</body>
+</html>
