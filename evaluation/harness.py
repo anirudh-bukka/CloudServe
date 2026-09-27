@@ -10,7 +10,7 @@ import uuid
 from collections import Counter, defaultdict
 from pathlib import Path
 
-from src.core import DecisionLog, Engine, load_json
+from src.core import PII, DecisionLog, Engine, failure_decision, load_json
 
 
 def percentile(values: list[float], p: float) -> float:
@@ -38,6 +38,12 @@ def report(tickets: list, decisions: list, logged: int) -> dict:
                            "recall": round(tp / actual, 3) if actual else None, "support": actual}
     eligible = [(l, d) for l, d in zip(labels, decisions) if l.get("expected_doc_ids")]
     retrieval_hits = sum(bool(set(l["expected_doc_ids"]) & {s["doc_id"] for s in d["sources"]}) for l, d in eligible)
+    labelled_routes = [(l, d) for l, d in zip(labels, decisions) if l.get("expected_route")]
+    false_automatic = sum(l["expected_route"] == "escalate" and d["route"] == "auto_respond" for l, d in labelled_routes)
+    false_escalations = sum(l["expected_route"] == "auto_respond" and d["route"] == "escalate" for l, d in labelled_routes)
+    cited_answers = [(l, d) for l, d in zip(labels, decisions) if d["route"] == "auto_respond" and l.get("expected_doc_ids")]
+    cited_doc_hits = sum(d["sources"][0]["doc_id"] in l["expected_doc_ids"] for l, d in cited_answers)
+    urgency_pairs = [(l, d) for l, d in zip(labels, decisions) if l.get("urgency")]
     calibration = []
     for band in range(5):
         group = [(l, d) for l, d in zip(labels, decisions) if l.get("intent") and min(4, int(d["classification"]["confidence"] * 5)) == band]
@@ -54,7 +60,8 @@ def report(tickets: list, decisions: list, logged: int) -> dict:
             groups[field][name] = {"count": len(paired),
                                    "auto_response_rate": round(sum(d["route"] == "auto_respond" for _, d in paired) / len(paired), 3),
                                    "classification_accuracy": round(sum(t.get("labels", {}).get("intent") == d["classification"]["intent"] for t, d in paired) / len(paired), 3) if all(t.get("labels", {}).get("intent") for t, _ in paired) else None,
-                                   "false_automatic_answers": sum(d["route"] == "auto_respond" and t.get("labels", {}).get("expected_route") == "escalate" for t, d in paired)}
+                                   "false_automatic_answers": sum(d["route"] == "auto_respond" and t.get("labels", {}).get("expected_route") == "escalate" for t, d in paired),
+                                   "cited_document_accuracy": round(sum(d["sources"][0]["doc_id"] in t["labels"]["expected_doc_ids"] for t, d in paired if d["route"] == "auto_respond" and t.get("labels", {}).get("expected_doc_ids")) / sum(d["route"] == "auto_respond" and bool(t.get("labels", {}).get("expected_doc_ids")) for t, d in paired), 3) if any(d["route"] == "auto_respond" and t.get("labels", {}).get("expected_doc_ids") for t, d in paired) else None}
     # Projected response time measures processing latency, not actual customer reply delivery.
     latencies = [d["latency_ms"] for d in decisions]
     historical = [t.get("history", {}) for t in tickets if isinstance(t, dict)]
@@ -63,21 +70,37 @@ def report(tickets: list, decisions: list, logged: int) -> dict:
     return {
         "volume": {"processed": total, "answered_automatically": counts["auto_respond"], "escalated": counts["escalate"], "blocked_by_guardrails": sum(d["blocked"] for d in decisions)},
         "business": {"projected_first_contact_resolution": round(counts["auto_respond"] / total, 3) if total else 0,
+                     "observed_first_contact_resolution": None,
                      "observed_first_contact_resolution_baseline": round(sum(baseline_fcr) / len(baseline_fcr), 3) if baseline_fcr else None,
+                     "mean_customer_first_reply_minutes": None,
+                     "median_customer_first_reply_minutes": None,
+                     "customer_satisfaction_proxy": None,
                      "mean_processing_response_time_ms": round(statistics.mean(latencies), 2) if latencies else 0,
                      "median_processing_response_time_ms": round(statistics.median(latencies), 2) if latencies else 0,
                      "historical_mean_resolution_time_minutes": round(statistics.mean(baseline_times), 2) if baseline_times else None,
                      "historical_median_resolution_time_minutes": round(statistics.median(baseline_times), 2) if baseline_times else None,
                      "escalation_rate": round(counts["escalate"] / total, 3) if total else 0},
         "technical": {"classification_by_class": per_class,
+                      "urgency_accuracy": round(sum(l["urgency"] == d["classification"]["urgency"] for l, d in urgency_pairs) / len(urgency_pairs), 3) if urgency_pairs else None,
                       "confidence_calibration": calibration,
                       "retrieval_hit_rate": round(retrieval_hits / len(eligible), 3) if eligible else None,
                       "retrieval_eligible_tickets": len(eligible),
+                      "cited_document_accuracy": round(cited_doc_hits / len(cited_answers), 3) if cited_answers else None,
+                      "cited_document_sample_size": len(cited_answers),
+                      "human_reviewed_hallucination_rate": None,
+                      "human_reviewed_claim_citation_accuracy": None,
+                      "availability": None,
                       "latency_median_ms": percentile(latencies, .5), "latency_p95_ms": percentile(latencies, .95)},
         "governance": {"decisions_logged": logged, "guardrail_activations_by_type": dict(guardrails),
-                       "private_data_detections": guardrails["private_data"], "subgroup_audit": groups},
+                       "private_data_detections": guardrails["private_data"],
+                       "private_data_in_outbound_drafts": sum(bool(PII.search(d["answer"] or "")) for d in decisions),
+                       "false_automatic_routes": false_automatic,
+                       "false_escalations": false_escalations,
+                       "must_not_auto_respond_violations": sum(d["route"] == "auto_respond" and bool(l.get("must_not_auto_respond")) for l, d in zip(labels, decisions)),
+                       "subgroup_audit": groups},
         "limitations": ["Projected first contact resolution assumes every automatic answer resolves the issue; no customer outcome is observed.",
                         "Processing time is not end-to-end customer reply delivery time.",
+                        "Human-reviewed hallucination, claim support, satisfaction, and availability are unmeasured.",
                         "Precision, recall and retrieval hit rate require labels and are null when the input has none."]
     }
 
@@ -100,11 +123,7 @@ def main() -> int:
         try:
             decision = engine.process(ticket)
         except Exception as exc:
-            decision = {"ticket_id": str(ticket.get("ticket_id", i)) if isinstance(ticket, dict) else str(i),
-                        "channel": "unknown", "classification": {"intent": "unclear_request", "urgency": "medium", "confidence": 0.0, "alternatives": []},
-                        "route": "escalate", "reason": f"Processing error: {type(exc).__name__}", "answer": None,
-                        "summary": "Processing failed; human review required", "sources": [],
-                        "guardrails": {"prompt_injection": False, "private_data": False, "grounding": False}, "blocked": False, "latency_ms": 0.0}
+            decision = failure_decision(ticket, exc)
         log.write(run_id, decision)
         decisions.append(decision)
     metrics = report(tickets, decisions, log.count(run_id))
