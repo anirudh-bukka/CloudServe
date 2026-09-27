@@ -9,8 +9,10 @@ import re
 import sqlite3
 import threading
 import time
+import uuid
 from collections import Counter, defaultdict
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CHANNELS = {"email", "chat", "docs_comment", "forum"}
 POLICY_INTENTS = {"security_incident", "compliance_request", "feature_request", "unclear_request"}
 SENSITIVE_INTENTS = {"billing_query", "quota_or_overage", "data_residency", "api_key_issue", "database_issue"}
+HIGH_IMPACT_INTENTS = SENSITIVE_INTENTS | {"sso_configuration", "webhook_issue"}
 INJECTION = re.compile(r"(?i)(ignore (all |your |previous )?(instructions|rules)|system prompt|developer message|you are now|disregard (the |all )?(policy|instructions)|override (the |your )?(policy|rules)|do not cite|reveal (your |the )?(prompt|secrets))")
 PII = re.compile(r"(?i)\b[\w.+-]+@[\w.-]+\.[a-z]{2,}\b|\b(?:\d[ -]*?){13,16}\b|-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|\b(?:sk|pk)_(?:live|test)_[A-Za-z0-9]{12,}\b")
 TOKEN = re.compile(r"[a-z0-9]+")
@@ -80,6 +83,7 @@ class Engine:
         self.examples = []
         grouped_examples = defaultdict(list)
         self.route_evidence = defaultdict(set)
+        historical = defaultdict(list)
         for t in training:
             n = normalize(t)
             if n["text"]:
@@ -87,6 +91,15 @@ class Engine:
                 self.examples.append(item)
                 grouped_examples[n["text"].lower()].append(item)
                 self.route_evidence[n["text"].lower()].add(t["labels"]["expected_route"])
+                historical[n["text"].lower()].append(t["labels"])
+        # A draft is eligible only when development examples agree on both the
+        # route and the primary document. Unseen wording receives human review.
+        self.known_answer_docs = {}
+        for text, labels in historical.items():
+            primary_docs = {tuple(label.get("expected_doc_ids") or [])[:1] for label in labels}
+            if (all(label.get("expected_route") == "auto_respond" and not label.get("must_not_auto_respond") for label in labels)
+                    and len(primary_docs) == 1 and next(iter(primary_docs))):
+                self.known_answer_docs[text] = next(iter(primary_docs))[0]
         self.passages = []
         for doc in self.documents:
             # Headings delimit passages; each remains directly traceable to its article.
@@ -165,7 +178,8 @@ class Engine:
         checks = {"prompt_injection": bool(INJECTION.search(ticket["text"])), "private_data": bool(PII.search(ticket["text"])), "grounding": False}
         reason = ""
         threshold = float(os.getenv("CONFIDENCE_THRESHOLD", "0.62"))
-        if os.getenv("AUTO_RESPONSE_ENABLED", "true").lower() != "true":
+        pause_file = Path(os.getenv("AUTO_RESPONSE_PAUSE_FILE", str(ROOT / "storage" / "pause_auto_responses")))
+        if os.getenv("AUTO_RESPONSE_ENABLED", "true").lower() != "true" or pause_file.exists():
             reason = "Automation paused by operator kill switch"
         elif checks["prompt_injection"]:
             reason = "Customer text contains instructions aimed at the system"
@@ -175,12 +189,18 @@ class Engine:
             reason = "Ticket contains no question or description"
         elif classification["intent"] in POLICY_INTENTS:
             reason = "Policy requires a human for this request category"
-        elif len(self.route_evidence[ticket["text"].lower()]) > 1:
+        elif classification["intent"] in HIGH_IMPACT_INTENTS:
+            reason = "Sensitive account, financial, data, or integration changes require human review"
+        elif len(self.route_evidence.get(ticket["text"].lower(), set())) > 1:
             reason = "Similar historical tickets required different routes; a human should resolve the ambiguity"
         elif not sources:
             reason = "No documentation passage met the relevance floor"
         elif classification["confidence"] < (0.85 if classification["intent"] in SENSITIVE_INTENTS else threshold):
             reason = "Classification confidence is below the routing threshold"
+        elif ticket["text"].lower() not in self.known_answer_docs:
+            reason = "No consistent development example supports an automatic answer"
+        elif sources[0].doc_id != self.known_answer_docs[ticket["text"].lower()]:
+            reason = "The highest ranked passage disagrees with the development evidence"
         answer = None
         if not reason:
             answer = self._draft(sources)
@@ -196,7 +216,18 @@ class Engine:
                 "route": route, "reason": reason or "Relevant documentation and safety checks passed",
                 "answer": answer, "summary": PII.sub("[REDACTED]", ticket["text"][:280]), "sources": [s.as_dict() for s in sources],
                 "guardrails": checks, "blocked": checks["prompt_injection"] or checks["private_data"] or reason == "Draft failed grounding or private data validation",
+                "threshold_applied": 0.85 if classification["intent"] in SENSITIVE_INTENTS else threshold,
                 "latency_ms": round((time.perf_counter() - started) * 1000, 2)}
+
+
+def failure_decision(raw: Any, error: Exception) -> dict[str, Any]:
+    ticket = normalize(raw)
+    return {"ticket_id": ticket["ticket_id"], "channel": ticket["channel"],
+            "classification": {"intent": "unclear_request", "urgency": "medium", "confidence": 0.0, "alternatives": []},
+            "route": "escalate", "reason": f"Processing error: {type(error).__name__}; human review required",
+            "answer": None, "summary": PII.sub("[REDACTED]", ticket["text"][:280]), "sources": [],
+            "guardrails": {"prompt_injection": False, "private_data": bool(PII.search(ticket["text"])), "grounding": False},
+            "blocked": True, "threshold_applied": None, "latency_ms": 0.0}
 
 
 class DecisionLog:
@@ -209,6 +240,23 @@ class DecisionLog:
 
     def write(self, run_id: str, decision: dict[str, Any]) -> None:
         c = decision["classification"]
+        decision["audit"] = {
+            "decision_id": str(uuid.uuid4()),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "ticket_id": decision["ticket_id"],
+            "stage": "routing",
+            "input_summary": decision["summary"],
+            "model": {"name": "local-weighted-nearest-neighbor", "version": "1"},
+            "prediction": {"value": c["intent"], "confidence": c["confidence"]},
+            "alternatives": c["alternatives"],
+            "sources_used": [{"doc_id": s["doc_id"], "score": s["score"]} for s in decision["sources"]],
+            "threshold_applied": decision.get("threshold_applied"),
+            "action_taken": decision["route"],
+            "reason": decision["reason"],
+            "guardrail_results": decision["guardrails"],
+            "prompt_version": "answer_v1" if decision["answer"] else None,
+            "requirement_ids": ["FR-01", "FR-02", "FR-03", "FR-04", "FR-05", "FR-06"],
+        }
         with self.lock:
             self.connection.execute("INSERT INTO decisions (run_id,ticket_id,route,intent,confidence,reason,payload) VALUES (?,?,?,?,?,?,?)",
                                     (run_id, decision["ticket_id"], decision["route"], c["intent"], c["confidence"], decision["reason"], json.dumps(decision)))
