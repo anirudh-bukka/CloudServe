@@ -354,7 +354,33 @@ button:disabled { opacity: .6; cursor: wait; }
 .how article { min-height: 213px; padding: 29px; background: rgba(255, 255, 255, .72); border: 1px solid rgba(255, 255, 255, .95); border-radius: 13px; box-shadow: 0 9px 26px rgba(35, 105, 129, .09), inset 0 1px 0 white; }
 .how article span { color: #3c9cad; font-size: 11px; font-weight: 700; }.how h3 { margin: 30px 0 8px; font-size: 23px; font-weight: 720; letter-spacing: -.05em; }.how p { color: #65838e; font-size: 12px; line-height: 1.65; }
 footer { display: flex; justify-content: space-between; gap: 16px; width: min(1440px, calc(100% - 76px)); margin: 0 auto 30px; padding: 13px 19px; color: #315b6b; font-size: 11px; background: rgba(255, 255, 255, .38); border: 1px solid rgba(255, 255, 255, .7); border-radius: 11px; box-shadow: 0 12px 30px rgba(29, 96, 121, .09); -webkit-backdrop-filter: blur(24px); backdrop-filter: blur(24px); }
+.status-page main::after { content: "CloudServe · System status"; }
+.status-page nav a[aria-current="page"] { color: #0e6580; background: rgba(255, 255, 255, .62); }
+.status-hero { min-height: 390px; padding-top: 62px; padding-bottom: 62px; }
+.status-hero h1 { max-width: 720px; }
+.status-hero p { max-width: 510px; }
+.hero > .status-orb { position: absolute; top: -95px; right: -40px; z-index: 1; display: grid; width: 510px; height: 510px; place-items: center; border: 1px solid rgba(255, 255, 255, .2); border-radius: 50%; box-shadow: inset 0 0 0 75px rgba(255, 255, 255, .045), inset 0 0 0 77px rgba(255, 255, 255, .15), inset 0 0 0 160px rgba(255, 255, 255, .035), inset 0 0 0 162px rgba(255, 255, 255, .15); opacity: .8; pointer-events: none; }
+.status-orb span { color: rgba(235, 255, 253, .82); font-size: 105px; text-shadow: 0 0 55px rgba(207, 255, 251, .5); }
+.status-content { padding: 57px clamp(28px, 5vw, 82px) 70px; background: rgba(248, 254, 253, .84); }
+.status-content .section-heading { align-items: end; }
+.status-content .section-heading p { color: #6d8995; font-size: 12px; }
+.status-banner { display: flex; align-items: center; gap: 17px; margin: 28px 0 17px; padding: 21px 24px; color: #195f65; background: linear-gradient(130deg, rgba(222, 248, 242, .95), rgba(230, 249, 250, .91)); border: 1px solid rgba(56, 158, 154, .18); border-radius: 13px; box-shadow: 0 10px 26px rgba(39, 116, 133, .08), inset 0 1px 0 rgba(255, 255, 255, .9); }
+.status-banner.is-degraded { color: #86552c; background: #fff5e8; border-color: rgba(186, 126, 55, .2); }
+.status-banner-icon { color: #2aaf86; font-size: 24px; line-height: 1; }
+.status-banner.is-degraded .status-banner-icon { color: #cc9146; }
+.status-banner strong { display: block; font-size: 17px; font-weight: 720; letter-spacing: -.025em; }
+.status-banner p { margin: 5px 0 0; color: #64878a; font-size: 12px; line-height: 1.5; }
+.status-banner.is-degraded p { color: #96734e; }
+.status-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 15px; }
+.status-card { min-height: 156px; padding: 25px 22px; background: rgba(255, 255, 255, .77); border: 1px solid rgba(255, 255, 255, .94); border-radius: 12px; box-shadow: 0 9px 26px rgba(35, 105, 129, .08), inset 0 1px 0 white; }
+.status-card-label { display: block; margin-bottom: 22px; color: #60818e; font-size: 10px; font-weight: 720; letter-spacing: .13em; }
+.status-card strong { display: block; color: #1b5265; font-size: clamp(20px, 2vw, 27px); font-weight: 730; letter-spacing: -.045em; }
+.status-card p { margin: 6px 0 0; color: #79929d; font-size: 12px; }
+.status-bottom { display: flex; align-items: center; justify-content: space-between; gap: 15px; padding: 23px 2px 0; color: #668693; font-size: 11px; }
+.status-bottom a { color: #116f88; font-weight: 650; text-decoration: none; }
+.status-bottom a:hover, .status-bottom a:focus-visible { text-decoration: underline; }
 @media (max-width: 980px) { .hero-art { right: -225px; opacity: .42; }.desk { grid-template-columns: 240px minmax(0, 1fr); }.main-panel { padding: 23px; } }
+@media (max-width: 980px) { .status-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }.hero > .status-orb { right: -220px; opacity: .43; } }
 @media (max-width: 700px) {
   header { flex-wrap: wrap; gap: 2px 15px; padding: 7px 15px; }
   nav { width: 100%; overflow-x: auto; scrollbar-width: none; }.brand { min-height: 30px; }
@@ -368,7 +394,10 @@ footer { display: flex; justify-content: space-between; gap: 16px; width: min(14
   .sample-list { display: flex; max-height: 134px; overflow-x: auto; }.sample { min-width: 175px; }
   .main-panel { padding: 20px; }.how-grid { grid-template-columns: 1fr; }.how article { min-height: 0; }
   footer { width: calc(100% - 24px); flex-wrap: wrap; margin-bottom: 15px; }
+  .status-hero { min-height: 0; padding: 55px 25px 58px; }.hero > .status-orb { display: none; }
+  .status-content { padding: 49px 20px; }.status-grid { gap: 10px; }.status-card { min-height: 136px; padding: 20px 17px; }
 }
 @media (max-width: 480px) { .form-row { display: block; }.form-bottom { align-items: stretch; flex-direction: column; }.form-bottom button { justify-content: center; }.result-grid { grid-template-columns: 1fr; } }
+@media (max-width: 480px) { .status-grid { grid-template-columns: 1fr; }.status-card { min-height: 0; }.status-card-label { margin-bottom: 12px; }.status-bottom { align-items: flex-start; flex-direction: column; }.status-banner { align-items: flex-start; padding: 18px; } }
 @media (max-width: 400px) { header { padding-right: 10px; padding-left: 10px; } nav { justify-content: space-between; } nav a { padding: 5px 4px; font-size: 10px; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; } }
