@@ -6,7 +6,7 @@ import os
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import urlparse
 
 from src.core import DecisionLog, Engine, ROOT, load_json
 
@@ -30,14 +30,34 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         path = urlparse(self.path).path
         if path == "/api/health":
-            return self.json(200, {"status": "ok", "documents": len(ENGINE.documents), "training_examples": len(ENGINE.examples)})
+            try:
+                with DB.lock:
+                    DB.connection.execute("SELECT 1").fetchone()
+                database = "ok"
+            except Exception:
+                database = "unavailable"
+            healthy = database == "ok"
+            return self.json(200 if healthy else 503, {
+                "status": "ok" if healthy else "degraded",
+                "documents": len(ENGINE.documents),
+                "training_examples": len(ENGINE.examples),
+                "database": database,
+                "automation_enabled": os.getenv("AUTO_RESPONSE_ENABLED", "true").lower() == "true",
+            })
         if path == "/api/samples":
             return self.json(200, [{"ticket_id": t["ticket_id"], "subject": t["subject"] or t["body"][:70], "channel": t["channel"]} for t in SAMPLES])
         if path.startswith("/api/samples/"):
             ticket_id = path.rsplit("/", 1)[-1]
             match = next((t for t in SAMPLES if t["ticket_id"] == ticket_id), None)
             return self.json(200 if match else 404, match or {"error": "Ticket not found"})
-        files = {"/": ("index.html", "text/html; charset=utf-8"), "/style.css": ("style.css", "text/css; charset=utf-8"), "/app.js": ("app.js", "application/javascript; charset=utf-8"), "/favicon.svg": ("favicon.svg", "image/svg+xml")}
+        files = {
+            "/": ("index.html", "text/html; charset=utf-8"),
+            "/status": ("status.html", "text/html; charset=utf-8"),
+            "/style.css": ("style.css", "text/css; charset=utf-8"),
+            "/app.js": ("app.js", "application/javascript; charset=utf-8"),
+            "/status.js": ("status.js", "application/javascript; charset=utf-8"),
+            "/favicon.svg": ("favicon.svg", "image/svg+xml"),
+        }
         if path in files:
             name, kind = files[path]
             return self.send(200, (ROOT / "static" / name).read_bytes(), kind)
